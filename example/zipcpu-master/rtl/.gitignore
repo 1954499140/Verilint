@@ -1,0 +1,6 @@
+zipsys_coverage/
+pipefetch.m
+export
+*.log
+usage.ys
+yosys.ys

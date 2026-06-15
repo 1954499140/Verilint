@@ -1,0 +1,23 @@
+{
+  "modules": {
+    "darkio": {
+      "cells": {
+        "cell1": {
+          "type": "$sdff",
+          "connections": {
+            "CLK": [2],
+            "SRST": [3],
+            "D": [4],
+            "Q": [5]
+          }
+        }
+      },
+      "netnames": {
+        "CLK": {"bits": [2]},
+        "nrst": {"bits": [3]},
+        "data": {"bits": [4]},
+        "out": {"bits": [5]}
+      }
+    }
+  }
+}

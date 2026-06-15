@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(f'  {i[\\\\\"code\\\\\"]}: {i[\\\\\"message\\\\\"]}'\\) for i in d['issues'] if i['code']=='REG001']\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(f'  {i[\\\\\"code\\\\\"]}: {i[\\\\\"message\\\\\"][:60]}'\\) for i in d['issues'] if i['code'].startswith\\('REG'\\)]\")",
+      "Bash(python verilint_checker.py ../example/dark/rtl/darkio.v --project ../example/dark/rtl -I ../example/dark/rtl)",
+      "Bash(python final_lint/verilint_checker.py example/dark/rtl/darkio.v --project example/dark/rtl -I example/dark/rtl)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \" import sys sys.path.insert\\(0, 'final_lint'\\) from verilint_checker import get_cached_project project = get_cached_project\\( 'example/dark/rtl', include_paths=['example/dark/rtl'], recursive=True, debug=True, use_cache=False # 禁用缓存 \\) print\\('\\\\\\\\nModules found:'\\) for name in project.modules: print\\(f' - {name}'\\) \")",
+      "Bash(xargs -n1 basename)",
+      "Bash(python)",
+      "Bash(python ai_fix_main.py /tmp/test_simple.v --analyze-only)",
+      "Bash(python final_lint/verilint_checker.py finish/32-verilog-project/CRC_32_serial.v)",
+      "Bash(python final_lint/verilint_checker.py finish/32-verilog-project/CRC_32_serial.v --json)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Total: {d[\"totalIssues\"]}'\\); [print\\(f'  Line {i[\"line\"]}: [{i[\"code\"]}] {i[\"message\"][:70]}'\\) for i in d['issues']]\")"
+    ],
+    "additionalDirectories": [
+      "\\tmp",
+      "E:\\Verilint\\final_lint"
+    ]
+  }
+}

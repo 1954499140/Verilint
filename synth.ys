@@ -1,0 +1,13 @@
+# 1. 读入所有RTL
+read_verilog -noassert -nomeminit  example/zipcpu-master/rtl/core/*.v
+
+# 2. 指定顶层（强烈建议手动指定）
+hierarchy -auto-top -keep_positionals
+
+# 3. 处理 always / 初始块
+proc
+# 7. 输出网表
+write_json output/design.json
+
+# 8. 统计
+stat

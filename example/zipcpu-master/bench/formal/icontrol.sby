@@ -1,0 +1,21 @@
+[tasks]
+prf
+cvr
+
+[options]
+prf: mode prove
+prf: depth 5
+cvr: mode cover
+cvr: depth 15
+
+[engines]
+smtbmc
+
+[script]
+read -formal -DICONTROL icontrol.v
+read -formal -DICONTROL fwb_slave.v
+prep -top icontrol
+
+[files]
+../../rtl/peripherals/icontrol.v
+../../rtl/ex/fwb_slave.v

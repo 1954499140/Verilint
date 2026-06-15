@@ -1,6 +1,5 @@
-from pyverilog.vparser.parser import parse
 from pyverilog.vparser.ast import *
-
+from lint.Error import GLOBAL_ERRORS,Error
 
 class Symbol:
     def __init__(self, name, scope, linenum, node):
@@ -113,7 +112,6 @@ class SemanticAnalyzer:
                 if symbolTable.getSymbol(attr.name) is None:
                     symbolTable.addSymbol(symbol)
                 symbolTable.getSymbol(attr.name).isinit = True
-
         return
 
     def buildBlock(self, item, symbolTable, curmodule,alway):
@@ -152,7 +150,9 @@ class SemanticAnalyzer:
 
     def buildIfStatement(self, item, symbolTable, curmodule,alway):
         if not item.false_statement:
-            log_print("可能缺少分支，注意查看第" + str(item.lineno) + "行")
+            # log_print("可能缺少分支，注意查看第" + str(item.lineno) + "行")
+            error = Error(1, f"if statement missing default else branch", item.lineno)
+            GLOBAL_ERRORS.add(error)
         self.buildCond(item.cond, None, symbolTable, curmodule)
         if curmodule not in self.branch:
             self.branch[curmodule] = []
@@ -210,7 +210,9 @@ class SemanticAnalyzer:
                 if attr.cond is None:
                     flag = False
         if flag:
-            log_print("CaseStatement缺少默认选项，在第" + str(item.lineno) + "行")
+            # log_print("CaseStatement缺少默认选项，在第" + str(item.lineno) + "行")
+            error = Error(1, f"switch statement missing default branch", item.lineno)
+            GLOBAL_ERRORS.add(error)
         self.buildCasesDfg(item, cases, symbolTable, curmodule)
 
         return
@@ -262,6 +264,7 @@ class SemanticAnalyzer:
         else:
             list = self.dfg[lval.name]
             for val in rval:
+                if isinstance(val,IntConst): continue
                 if val not in list:
                     if val.level > max:
                         max = val.level
@@ -269,10 +272,12 @@ class SemanticAnalyzer:
             lval.level = max + 1
             self.dfg[lval.name] = list
         for item in list:
-            if not isinstance(item,Identifier):
+            if not isinstance(item,Symbol):
                 continue
             if item.isinit == False:
-                log_print(str(item.name) + "未初始化,在第" + str(item.node.lineno) + "行")
+                error=Error(1,f"Variable '{item.name}' is not initialized",item.node.lineno)
+                GLOBAL_ERRORS.add(error)
+                # log_print(str(item.name) + "未初始化,在第" + str(item.node.lineno) + "行")
         return
 
     def buildSubstitution(self, item, symbolTable, curmodule,alway):
@@ -287,6 +292,7 @@ class SemanticAnalyzer:
                 lval = symbolTable.getSymbol(str(val.var))
             elif isinstance(val, Rvalue):
                 self.buildRvalue(val, symbolTable, rval)
+            elif isinstance(val,DelayStatement):continue
             if isinstance(val.var, Pointer):
                 self.pointers.append(val.var)
                 self.pointerMap[val.var] = curmodule
@@ -382,8 +388,19 @@ class SemanticAnalyzer:
                 if symbol.name not in self.DefAlways:
                     self.DefAlways[symbol]=set()
                 return
-
-        return
+            if isinstance(param,Decl):
+               p = param.list
+               if isinstance(p[0],Parameter):
+                   symbol = Symbol(str(p[0].name), symbolTable.getScopeLevel(), p[0].lineno, p[0])
+                   symbolTable.addSymbol(symbol)
+                   if symbol.name not in self.dfg:
+                       self.dfg[symbol.name] = []
+                   if symbol.name not in self.DefAlways:
+                       self.DefAlways[symbol] = set()
+                   rval=[]
+                   self.buildRvalue(p[0].value,symbolTable,rval)
+                   self.dfg[symbol.name]=rval
+               return
 
     def analyzer(self, ast):
         self.ast = ast
@@ -419,9 +436,9 @@ class SemanticAnalyzer:
                 symbolTable = new_symbolTable
                 self.buildDecl(attr, symbolTable)
             elif isinstance(attr, ForStatement):
-                self.buildForStatement(attr, symbolTable, curmodule)
+                self.buildForStatement(attr, symbolTable, curmodule,None)
             elif isinstance(attr, Block):
-                self.buildBlock(attr, symbolTable, curmodule)
+                self.buildBlock(attr, symbolTable, curmodule,None)
         return
 
     #     进一步解析ReValue的值，Substitution和assign均有用到，但是assign的内容是一旦赋值就需要被改变，因此assign需要考虑毛刺，
@@ -439,11 +456,21 @@ class SemanticAnalyzer:
                 symbolTable.addSymbol(symbol)
             if symbolTable.getSymbol(str(val)) not in rval:
                 rval.append(symbolTable.getSymbol(str(val)))
+        elif isinstance(val,Parameter):
+            symbol = Symbol(str(val), symbolTable.getScopeLevel(), val.lineno, val)
+            if not symbolTable.getSymbol(str(val)):
+                symbolTable.addSymbol(symbol)
+            if symbolTable.getSymbol(str(val)) not in rval:
+                rval.append(symbolTable.getSymbol(str(val)))
         elif isinstance(val, IntConst):
             return
         elif isinstance(val,Concat):
             return
         elif isinstance(val,Cond):
+            return
+        elif isinstance(val,Operator):
+            return
+        elif isinstance(val,Repeat):
             return
         elif isinstance(val.var, Identifier):
             symbol = Symbol(str(val.var), symbolTable.getScopeLevel(), val.var.lineno, val.var)
@@ -452,6 +479,7 @@ class SemanticAnalyzer:
             if symbolTable.getSymbol(str(val.var)) not in rval:
                 rval.append(symbolTable.getSymbol(str(val.var)))
         elif isinstance(val.var, IntConst):
+            rval.append(val.var)
             return
         elif isinstance(val.var, UnaryOperator):
             symbol = Symbol(str(val.var.right), symbolTable.getScopeLevel(), val.var.right.lineno, val.var.right)
@@ -461,6 +489,7 @@ class SemanticAnalyzer:
                 rval.append(symbolTable.getSymbol(str(val.var.right)))
         elif isinstance(val.var, Operator):
             if isinstance(val.var, Cond):
+                self.buildRvalue(val.var.cond,symbolTable,rval)
                 self.buildRvalue(val.var.true_value, symbolTable, rval)
                 self.buildRvalue(val.var.false_value, symbolTable, rval)
             else:
@@ -528,6 +557,8 @@ class SemanticAnalyzer:
             symbol=None
             if isinstance(item,Ioport):
                 symbol=symbolTable.getSymbol(item.first.name)
+            elif isinstance(item,Decl):
+                return
             else:
                 symbol=symbolTable.getSymbol(item.name)
             if param == symbol:

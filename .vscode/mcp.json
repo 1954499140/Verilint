@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "kimi": {
+      "command": "npx",
+      "args": ["-y", "kimi-api-mcp@latest"],
+      "env": {
+        "MOONSHOT_API_KEY": "sk-TUIvgD1IsYPLkAVchQ8hgX7IE0Ia0BRdk0hrH1nhwB5RV6U5"
+      }
+    }
+  }
+}

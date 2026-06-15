@@ -1,0 +1,68 @@
+[tasks]
+full		bus32  system  lock    dualread
+full_single	bus32  system  lock
+bare		bus32  nolocal lock    dualread
+nolock_nolocal	bus32  nolocal nolock  dualread
+nolock_system	bus32  system  nolock  dualread
+piped		bus32  system  lock    dualread
+cover           bus32  system  lock    dualread
+cover_pipe      bus32  system  lock    dualread cover piped
+piped_lp	bus32  system  lock    dualread opt_lowpower
+prf64		bus64  system  lock    dualread
+prf64lp		bus64  system  lock    dualread opt_lowpower
+prf128		bus128 system  lock    dualread
+prf128lp	bus128 system  lock    dualread opt_lowpower
+
+[options]
+~cover: mode prove
+cover:  mode cover
+depth 16
+full:           depth  9
+full_single:    depth  9
+bare:           depth  9
+nolock_nolocal: depth  9
+nolock_system:  depth  9
+piped:          depth  9
+cover:          depth 24
+cover_pipe:     depth 45
+
+[engines]
+# smtbmc yices
+smtbmc boolector
+# abc pdr
+# aiger suprove
+# aiger avy
+
+[script]
+read -formal           fwb_master.v
+read -formal           iscachable.v
+read -formal           fmem.v
+read -formal -D DCACHE dcache.v
+--pycode-begin--
+cmd = "hierarchy -top dcache"
+cmd += " -chparam OPT_PIPE           %d" % (1 if "piped"    in tags else 0)
+cmd += " -chparam OPT_DUAL_READ_PORT %d" % (1 if "dualread" in tags else 0)
+cmd += " -chparam OPT_LOCK           %d" % (1 if "lock"     in tags else 0)
+cmd += " -chparam OPT_LOCAL_BUS      %d" % (1 if "system"   in tags else 0)
+cmd += " -chparam OPT_LOWPOWER       %d" % (1 if "opt_lowpower" in tags else 0)
+if ("bus32" in tags):
+	cmd += " -chparam BUS_WIDTH 32"
+elif ("bus64" in tags):
+	cmd += " -chparam BUS_WIDTH 64"
+elif ("bus128" in tags):
+	cmd += " -chparam BUS_WIDTH 128"
+elif ("bus256" in tags):
+	cmd += " -chparam BUS_WIDTH 256"
+elif ("bus512" in tags):
+	cmd += " -chparam BUS_WIDTH 512"
+output(cmd)
+--pycode-end--
+proc -norom
+prep -top dcache
+
+[files]
+../../rtl/core/dcache.v
+../../rtl/core/iscachable.v
+../../rtl/ex/fwb_master.v
+fmem.v
+#

@@ -24,8 +24,7 @@ llm = ChatOpenAI(
 prompt = ChatPromptTemplate.from_messages([
     ("system", """Now you are expert in HDL(Hardware Description Language).
                     Your task involves debugging in HDL. You are given snippets of HDL
-                    script that contain errors.
-                    Your objective is to identify the reset signal"""),
+                    script."""),
     ("user", """here is the code:{code}
                 你需要给我一个文档
                 ### 文档要求：
@@ -76,18 +75,44 @@ def read_code_file(file_path: str, encoding: str = 'utf-8'):  # 替换 tuple->Tu
         raise IOError(f"❌ Failed to read file: {str(e)}")
 
 
-def log_print(msg):
+def log_print(msg,path):
     log_msg = f"{msg}"
     # 追加写入文件
-    with open('Identifyagent_log.txt', 'w', encoding='utf-8') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(log_msg + '\n')
+def process_all_files():
+    """批量处理文件夹内所有目标文件"""
+    INPUT_FOLDER = "./example2/"
+    # 生成的报告保存路径
+    TARGET_EXTENSIONS = [".v"]
 
+    # 遍历文件夹
+    file_list = []
+    for filename in os.listdir(INPUT_FOLDER):
+
+        # 获取文件完整路径
+        file_path = os.path.join(INPUT_FOLDER, filename)
+        # 只处理文件，跳过文件夹
+        if os.path.isfile(file_path):
+            # 筛选指定后缀的文件
+            file_ext = os.path.splitext(filename)[-1].lower()
+            if file_ext in TARGET_EXTENSIONS:
+                file_list.append((filename, file_path))
+
+
+
+    # # 逐个处理文件
+    for idx, (filename, file_path) in enumerate(file_list, 1):
+        base_name = os.path.splitext(filename)[0]
+
+
+        report_filename = base_name + ".txt"
+        report_path = os.path.join("./reports2", report_filename)
+        code = read_code_file(file_path)
+        answer = ask_question(code)
+        # print("正在处理" + filename)
+        log_print(answer,report_path)
 
 if __name__ == "__main__":
-    code = read_code_file("./example/reset.v")
-    # error = read_code_file("./dma_log.txt")
-    question = code
-    answer = ask_question(question)
-    log_print(f"模型回答：{answer}")
-
+    process_all_files()
 

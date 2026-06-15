@@ -1,7 +1,5 @@
-import semanticAnalyzer
-from pyverilog.vparser.ast import *
 from semanticAnalyzer import *
-
+from lint.Error import GLOBAL_ERRORS
 class DFGChecker:
     def __init__(self, semanticAnalyzer):
         self.always = semanticAnalyzer.always
@@ -14,8 +12,8 @@ class DFGChecker:
         self.instances=semanticAnalyzer.instances
         self.defAlways = semanticAnalyzer.DefAlways
     def check(self):
-        self.checkgitch()
-        self.checkhanMing()
+        # self.checkgitch()
+        # self.checkhanMing()
         self.checkDeadState()
         self.checkCobineloop()
     def checkgitch(self):
@@ -36,7 +34,9 @@ class DFGChecker:
             # val=values[0].level
         for key,values in dfgs.items():
             if not self.findgitch(values,valuesRelay):
-                log_print(str(key)+"存在毛刺，即不同时到达改变变量值")
+                # 注意存行数
+                error = Error(1, f"Glitch detected on {str(key)} caused by non-simultaneous signal change",0)
+                GLOBAL_ERRORS.add(error)
     def checkDeadState(self):
         for caseStatement in self.caseStatements:
             self.checkCaseStatements(caseStatement)
@@ -49,6 +49,8 @@ class DFGChecker:
         temp_relays.append(caseStatement.comp)
         relays = []
         for relay in temp_relays:
+            if relay==None:continue
+            if isinstance(relay,Partselect):continue
             relays.append(relay.name)
         for value in defStatementMap.keys():
             if str(value) in relays:
@@ -88,7 +90,8 @@ class DFGChecker:
                         break
             if flag and len(turnlist)==1:
                 self.isError = True
-                log_print("可能存在死亡状态，注意第" + str(case.lineno) + "行")
+                error = Error(2, f"State machine may have dead state", case.lineno)
+                GLOBAL_ERRORS.add(error)
             for turn in turnlist:
                 caseVisited[turn] = True
         for key, value in caseVisited.items():
@@ -97,7 +100,8 @@ class DFGChecker:
                 for case in cases:
                     if case.cond:
                         if key == case.cond[0].name:
-                            log_print("该Case无法到达,在第" + str(case.cond[0].lineno) + "行")
+                            error = Error(2, f"State machine may have unreachable state", case.lineno)
+                            GLOBAL_ERRORS.add(error)
 
     # 判断所有依赖的节点
     def judgeValues(self, values):
@@ -139,6 +143,8 @@ class DFGChecker:
     def checkCovered(self, caseStatement):
         comp=caseStatement.comp
         for relay in self.dfg[str(comp)]:
+            if relay==None: return
+            if isinstance(relay,Identifier): continue
             if isinstance(relay.node,Decl):
                 return
             elif isinstance(relay.node,Ioport):
@@ -149,7 +155,45 @@ class DFGChecker:
                         length=int(msb.value)-int(lsb.value)
                         l = pow(2,length)
                         if l > len(caseStatement.caselist):
-                            log_print("分支未完全覆盖,在第"+str(caseStatement.lineno)+"行")
+                            error = Error(1, f"Case branches not fully covered at line", caseStatement.lineno)
+                            GLOBAL_ERRORS.add(error)
+                elif isinstance(msb,Operator):
+                    result=self.compute(msb.left,msb.right,msb)
+                    if result==-1:return
+                    else:
+                        l=pow(2,result)
+                        if l>len(caseStatement.caselist):
+                            error = Error(1, f"Case branches not fully covered at line",
+                                          caseStatement.lineno)
+                            GLOBAL_ERRORS.add(error)
+
+    def compute(self,left,right,Op):
+        if isinstance(left,Operator):
+            left=self.compute(left.left,left.right,left)
+        if isinstance(right,Operator):
+            right=self.compute(right.left,right.right,right)
+        if isinstance(left,Identifier):
+            list=self.dfg[left.name]
+            if len(list)==1 and isinstance(list[0],IntConst):
+                left=list[0].value
+            else: return -1
+        if isinstance(right,Identifier):
+            list = self.dfg[right.name]
+            if len(list) == 1 and isinstance(list[0], IntConst):
+                right = list[0].value
+            else:return -1
+        if isinstance(Op,Minus):
+            if isinstance(left,str):
+                left=int(left)
+            if isinstance(left,IntConst):
+                left=left.value
+            if isinstance(right,str):
+                right=int(right)
+            if isinstance(right,IntConst):
+                right=right.value
+            return int(left)-int(right)
+        elif isinstance(Op,Plus):
+            return int(left)+int(right)
 
     def checkhanMing(self):
         for values in self.constantMap.values():
@@ -207,6 +251,7 @@ class DFGChecker:
         - values中元素的value属性为十进制字符串（如"0"）
         """
         # 解析所有编码（自动兼容十进制str/Verilog编码）
+
         parsed_codes = {code: self.parse_verilog_code(code.value) for code in values}
         values=list(values)
         # 原有两两计算逻辑
@@ -218,6 +263,7 @@ class DFGChecker:
                 bin2 = parsed_codes[code2]
                 dist = self.calc_hamming_distance(bin1, bin2)
                 violation = "✅ 违规" if dist == 1 else "❌ 合规"
+                # 汉明距等会拟定
                 log_print(f"{code1.value} ↔ {code2.value}：汉明距离={dist} {violation}")
 
     def checkCobineloop(self):
@@ -238,6 +284,7 @@ class DFGChecker:
             path.append(current_node)
             # 遍历当前节点的所有依赖（有向边）
             for neighbor in self.dfg[current_node]:
+                if neighbor not in self.defAlways: continue
                 for alway in self.defAlways[neighbor]:
                     if isinstance(alway,Always):
                         for sen in alway.sens_list.list:
@@ -254,6 +301,8 @@ class DFGChecker:
                 dfs(node, [])
 
         if len(cycles)>0:
+            error = Error(2, f"Circular dependency detected", 0)
+            GLOBAL_ERRORS.add(error)
             for cycle in cycles:
                 log_print(str(cycle))
 

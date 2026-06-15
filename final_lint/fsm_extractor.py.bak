@@ -1,0 +1,729 @@
+from typing import Optional, Dict, List, Any, Set, Tuple
+from enum import Enum
+from dataclasses import dataclass, field
+from pyverilog.vparser.ast import *
+from symbol import Symbol
+from dfg_builder import DataflowGraph, DFGBuilder, AlwaysBlockInfo
+
+
+class StateEncoding(Enum):
+    """状态编码方式"""
+    BINARY = "binary"           # 二进制编码
+    ONE_HOT = "one_hot"         # 独热码
+    GRAY = "gray"               # 格雷码
+    ONE_COLD = "one_cold"       # 独冷码
+    UNKNOWN = "unknown"         # 未知
+
+
+@dataclass
+class State:
+    """
+    FSM状态
+    """
+    name: str                           # 状态名
+    value: Any                          # 状态值（可以是整数或位向量）
+    encoding: StateEncoding = StateEncoding.UNKNOWN
+    is_initial: bool = False            # 是否是初始状态
+    lineno: int = 0                     # 定义行号
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        if isinstance(other, State):
+            return self.name == other.name
+        return False
+
+
+@dataclass
+class StateTransition:
+    """
+    状态转换
+    """
+    from_state: State                   # 源状态
+    to_state: State                     # 目标状态
+    condition: str                      # 转换条件（字符串表示）
+    condition_expr: Any = None          # 条件表达式（AST节点）
+    lineno: int = 0                     # 行号
+    is_default: bool = False            # 是否是默认转换
+
+    def __repr__(self) -> str:
+        return f"{self.from_state.name} --[{self.condition}]--> {self.to_state.name}"
+
+
+@dataclass
+class FSM:
+    """
+    有限状态机
+    """
+    name: str                           # FSM名称（通常基于always块位置）
+    state_variable: str                 # 状态变量名
+    states: Dict[str, State] = field(default_factory=dict)
+    transitions: List[StateTransition] = field(default_factory=list)
+
+    # 状态机属性
+    encoding: StateEncoding = StateEncoding.UNKNOWN
+    is_mealy: bool = False              # 是否是Mealy机（输出与输入和状态有关）
+    is_moore: bool = False              # 是否是Moore机（输出仅与状态有关）
+
+    # 时钟和复位
+    clock_signal: Optional[str] = None
+    reset_signal: Optional[str] = None
+
+    # 所属的always块信息
+    always_lineno: int = 0
+    sensitivity_list: List[str] = field(default_factory=list)
+
+    def add_state(self, state: State):
+        """添加状态"""
+        self.states[state.name] = state
+
+    def add_transition(self, transition: StateTransition):
+        """添加状态转换"""
+        self.transitions.append(transition)
+
+    def get_initial_state(self) -> Optional[State]:
+        """获取初始状态"""
+        for state in self.states.values():
+            if state.is_initial:
+                return state
+        return None
+
+    def get_transitions_from(self, state_name: str) -> List[StateTransition]:
+        """获取从指定状态出发的所有转换"""
+        return [t for t in self.transitions if t.from_state.name == state_name]
+
+    def get_transitions_to(self, state_name: str) -> List[StateTransition]:
+        """获取到达指定状态的所有转换"""
+        return [t for t in self.transitions if t.to_state.name == state_name]
+
+    def detect_encoding(self):
+        """检测状态编码方式"""
+        if not self.states:
+            return
+
+        values = [s.value for s in self.states.values() if s.value is not None]
+        if not values:
+            self.encoding = StateEncoding.UNKNOWN
+            return
+
+        # 尝试检测one-hot编码
+        one_hot_count = 0
+        for v in values:
+            if isinstance(v, int):
+                # 检查是否是2的幂（只有一个1）
+                if v > 0 and (v & (v - 1)) == 0:
+                    one_hot_count += 1
+
+        if one_hot_count == len(values):
+            self.encoding = StateEncoding.ONE_HOT
+            for state in self.states.values():
+                state.encoding = StateEncoding.ONE_HOT
+            return
+
+        # 检查是否是连续的二进制编码
+        int_values = sorted([v for v in values if isinstance(v, int)])
+        if int_values == list(range(len(int_values))):
+            self.encoding = StateEncoding.BINARY
+            for state in self.states.values():
+                state.encoding = StateEncoding.BINARY
+            return
+
+        self.encoding = StateEncoding.UNKNOWN
+
+    def print_fsm(self):
+        """打印FSM信息"""
+        print(f"\n{'='*60}")
+        print(f"FSM: {self.name}")
+        print(f"{'='*60}")
+        print(f"State Variable: {self.state_variable}")
+        print(f"Clock: {self.clock_signal}, Reset: {self.reset_signal}")
+        print(f"Encoding: {self.encoding.value}")
+        print(f"Type: {'Mealy' if self.is_mealy else 'Moore' if self.is_moore else 'Unknown'}")
+
+        print(f"\nStates ({len(self.states)}):")
+        for name, state in self.states.items():
+            initial_mark = " (INITIAL)" if state.is_initial else ""
+            print(f"  {name} = {state.value}{initial_mark}")
+
+        print(f"\nTransitions ({len(self.transitions)}):")
+        for trans in self.transitions:
+            print(f"  {trans}")
+
+        # 打印出度/入度统计
+        print("\nState Statistics:")
+        for name in self.states.keys():
+            out_degree = len(self.get_transitions_from(name))
+            in_degree = len(self.get_transitions_to(name))
+            print(f"  {name}: out={out_degree}, in={in_degree}")
+
+
+class FSMExtractor:
+    """
+    状态机提取器
+    从Verilog代码中提取有限状态机（FSM）并生成状态转换图
+    """
+
+    def __init__(self, dfg_builder: DFGBuilder):
+        self.dfg_builder = dfg_builder
+        self.fsms: List[FSM] = []
+        self.current_fsm: Optional[FSM] = None
+
+        # 常见状态变量名模式
+        self.state_var_patterns = ['state', 'current_state', 'curr_state', 'cs', 'present_state', 'ps']
+
+    def extract(self) -> List[FSM]:
+        """
+        从所有模块中提取FSM
+        返回FSM列表
+        """
+        self.fsms = []
+
+        for module_name, dfg in self.dfg_builder.dfgs.items():
+            self._extract_from_module(module_name, dfg)
+
+        return self.fsms
+
+    def _extract_from_module(self, module_name: str, dfg: DataflowGraph):
+        """从单个模块中提取FSM"""
+        # 1. 先收集所有子图（时序和组合）
+        seq_subgraphs = []
+        comb_subgraphs = []
+
+        for subgraph_name, subgraph in dfg.subgraphs.items():
+            if subgraph.is_sequential:
+                seq_subgraphs.append((subgraph_name, subgraph))
+            elif subgraph.is_combinational:
+                comb_subgraphs.append((subgraph_name, subgraph))
+
+        # 2. 对每个时序子图，尝试提取FSM
+        for subgraph_name, seq_subgraph in seq_subgraphs:
+            fsm = self._extract_fsm_from_always(subgraph_name, seq_subgraph, comb_subgraphs)
+            if fsm:
+                self.fsms.append(fsm)
+
+    def _extract_fsm_from_always(self, subgraph_name: str, seq_subgraph: DataflowGraph,
+                                   comb_subgraphs: List[Tuple[str, DataflowGraph]]) -> Optional[FSM]:
+        """
+        从always块中提取FSM
+        识别状态变量、状态值和状态转换
+
+        Args:
+            subgraph_name: 时序子图名称
+            seq_subgraph: 时序子图（状态寄存器）
+            comb_subgraphs: 组合逻辑子图列表（下一状态逻辑）
+        """
+        # 1. 识别状态变量（在时序子图中）
+        state_var = self._identify_state_variable(seq_subgraph)
+        if not state_var:
+            return None
+
+        print(f"[DEBUG] Found state variable: {state_var}")
+
+        # 2. 创建FSM对象
+        fsm = FSM(
+            name=subgraph_name,
+            state_variable=state_var,
+            clock_signal=seq_subgraph.clock_signal,
+            reset_signal=seq_subgraph.reset_signal,
+            always_lineno=seq_subgraph.name.split('_')[-2] if '_always_' in seq_subgraph.name else 0,
+            sensitivity_list=seq_subgraph.sensitivity_list
+        )
+        self.current_fsm = fsm
+
+        # 3. 提取状态定义（从符号表的参数或局部参数中）
+        self._extract_states(fsm, state_var)
+        print(f"[DEBUG] States extracted: {list(fsm.states.keys())}")
+
+        # 4. 找到下一状态变量（通常是 next_state 或类似的）
+        next_state_var = self._find_next_state_variable(state_var, comb_subgraphs)
+        print(f"[DEBUG] Next state variable: {next_state_var}")
+
+        # 5. 从原始AST中提取状态转换（更可靠）
+        # 通过子图的节点找到原始AST中的always块
+        for comb_name, comb_subgraph in comb_subgraphs:
+            print(f"[DEBUG] Checking comb subgraph: {comb_name}")
+            # 直接从AST节点提取转换
+            self._extract_transitions_from_ast(fsm, comb_subgraph, state_var, next_state_var)
+
+        print(f"[DEBUG] Transitions extracted: {len(fsm.transitions)}")
+
+        # 6. 检测编码方式
+        fsm.detect_encoding()
+
+        # 6. 确定初始状态
+        self._identify_initial_state(fsm, seq_subgraph)
+
+        self.current_fsm = None
+
+        # 只返回有效FSM（至少有一个状态和一条转换）
+        if fsm.states and fsm.transitions:
+            return fsm
+        return None
+
+    def _identify_state_variable(self, subgraph: DataflowGraph) -> Optional[str]:
+        """
+        识别状态变量
+        策略：
+        1. 查找在case/switch语句中使用的变量
+        2. 匹配常见状态变量名
+        3. 查找被多次赋值的reg变量
+        """
+        candidates = []
+
+        # 分析所有定义，寻找可能的state变量
+        for symbol_name, defs in subgraph.symbol_defs.items():
+            # 跳过输出端口
+            if any(d.symbol.is_output() for d in defs if hasattr(d, 'symbol')):
+                continue
+
+            score = 0
+
+            # 匹配常见模式
+            lower_name = symbol_name.lower()
+            for pattern in self.state_var_patterns:
+                if pattern in lower_name:
+                    score += 10
+
+            # 检查是否有case语句中的使用
+            if symbol_name in subgraph.symbol_uses:
+                for use in subgraph.symbol_uses[symbol_name]:
+                    if use.use_type == 'condition':
+                        score += 5
+
+            # 检查是否有多个定义（状态转换）
+            nonblocking_defs = [d for d in defs if d.def_type == 'nonblocking']
+            if len(nonblocking_defs) > 1:
+                score += 3
+
+            if score > 0:
+                candidates.append((symbol_name, score))
+
+        # 返回得分最高的候选
+        if candidates:
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            return candidates[0][0]
+
+        return None
+
+    def _find_next_state_variable(self, state_var: str,
+                                   comb_subgraphs: List[Tuple[str, DataflowGraph]]) -> Optional[str]:
+        """
+        查找下一状态变量名
+        通常是 next_state, ns, next_xxx 等
+        """
+        # 常见模式
+        next_state_patterns = ['next_state', 'nextstate', 'ns', 'nstate']
+
+        # 从状态变量名推断
+        if 'current' in state_var.lower() or 'curr' in state_var.lower():
+            inferred_next = state_var.replace('current', 'next').replace('curr', 'next')
+            next_state_patterns.append(inferred_next)
+        if state_var.lower() == 'cs':  # current state
+            next_state_patterns.append('ns')
+
+        # 在组合逻辑子图中查找
+        for comb_name, comb_subgraph in comb_subgraphs:
+            for symbol_name in comb_subgraph.symbol_defs.keys():
+                lower_name = symbol_name.lower()
+                for pattern in next_state_patterns:
+                    if pattern in lower_name:
+                        return symbol_name
+
+            # 也检查symbol_uses中是否有对状态变量的使用
+            # 和可能的下一状态变量定义
+            for symbol_name, uses in comb_subgraph.symbol_uses.items():
+                if symbol_name == state_var:
+                    # 找到使用状态变量的子图，查找其定义的变量
+                    for def_name in comb_subgraph.symbol_defs.keys():
+                        if def_name != state_var:
+                            return def_name
+
+        return None
+
+    def _extract_states(self, fsm: FSM, state_var: str):
+        """提取状态定义"""
+        # 从符号表构建器中获取状态参数的符号
+        stb = self.dfg_builder.stb
+        scope = stb.current_scope
+
+        if not scope:
+            return
+
+        print(f"[DEBUG] Extracting states from {len(scope.symbols)} symbols")
+
+        # 查找localparam或parameter定义的状态
+        # 状态参数通常是整数常量
+        for name, symbol in scope.symbols.items():
+            # 只考虑参数类型
+            if not symbol.is_param_type():
+                continue
+
+            print(f"[DEBUG] Checking parameter: {name}")
+
+            # 尝试获取参数值
+            value = None
+
+            # 方法1: 尝试从const_value获取
+            if symbol.is_const():
+                value = symbol.get_const_value()
+                print(f"[DEBUG]   Got const_value: {value}")
+
+            # 方法2: 尝试从param_value解析
+            if value is None and symbol.param_value is not None:
+                value = self._parse_param_value(symbol.param_value)
+                print(f"[DEBUG]   Parsed param_value: {value}")
+
+            # 方法3: 如果是简单的整数，直接使用
+            if value is None:
+                # 尝试通过SymbolTableBuilder的_eval_const_expr来解析
+                value = stb._eval_const_expr(symbol.param_value)
+                print(f"[DEBUG]   Evaluated param_value: {value}")
+
+            if value is not None:
+                # 检查是否是整数（可能是状态值）
+                if isinstance(value, int):
+                    state = State(
+                        name=name,
+                        value=value,
+                        lineno=symbol.lineno
+                    )
+                    fsm.add_state(state)
+                    print(f"[DEBUG]   Added state: {name} = {value}")
+
+        # 如果没有找到参数定义的状态，尝试从case语句中推断
+        if not fsm.states:
+            self._infer_states_from_transitions(fsm, state_var)
+
+    def _parse_param_value(self, param_value) -> Optional[int]:
+        """解析参数值"""
+        if param_value is None:
+            return None
+
+        # 如果是Rvalue，取出其中的值
+        if isinstance(param_value, Rvalue):
+            return self._parse_param_value(param_value.var)
+
+        # 如果是IntConst，直接解析
+        if isinstance(param_value, IntConst):
+            return self._parse_int_const(param_value)
+
+        # 如果是整数，直接返回
+        if isinstance(param_value, int):
+            return param_value
+
+        return None
+
+    def _infer_states_from_transitions(self, fsm: FSM, state_var: str):
+        """从转换中推断状态（当没有明确定义时）"""
+        # 这个方法会在转换提取后调用
+        pass
+
+    def _extract_transitions_from_ast(self, fsm: FSM, comb_subgraph: DataflowGraph,
+                                       state_var: str, next_state_var: str):
+        """
+        从原始AST中提取状态转换
+        通过访问组合逻辑子图的 always_ast_node 来获取完整的case语句
+        """
+        print(f"[DEBUG] _extract_transitions_from_ast for {fsm.name}")
+
+        # 获取原始always块AST节点
+        always_node = comb_subgraph.always_ast_node
+        if not always_node:
+            print(f"[DEBUG]   No AST node found in subgraph")
+            return
+
+        print(f"[DEBUG]   Found always AST node at line {always_node.lineno}")
+
+        # 递归查找case语句
+        self._find_and_process_case_in_stmt(fsm, always_node.statement, state_var, next_state_var)
+
+    def _find_and_process_case_in_stmt(self, fsm: FSM, stmt, state_var: str, next_state_var: str):
+        """递归查找语句中的case语句"""
+        if not stmt:
+            return
+
+        if isinstance(stmt, CaseStatement):
+            print(f"[DEBUG]   Found CaseStatement at line {stmt.lineno}")
+            self._process_case_statement(fsm, stmt, state_var, next_state_var)
+
+        elif isinstance(stmt, Block):
+            for s in stmt.statements:
+                self._find_and_process_case_in_stmt(fsm, s, state_var, next_state_var)
+
+        elif isinstance(stmt, IfStatement):
+            if stmt.true_statement:
+                self._find_and_process_case_in_stmt(fsm, stmt.true_statement, state_var, next_state_var)
+            if stmt.false_statement:
+                self._find_and_process_case_in_stmt(fsm, stmt.false_statement, state_var, next_state_var)
+
+    def _extract_transitions(self, fsm: FSM, subgraph: DataflowGraph, state_var: str, next_state_var: str):
+        """提取状态转换（旧方法，保留但不再使用）"""
+        print(f"[DEBUG] _extract_transitions: checking {len(subgraph.nodes)} nodes")
+
+        for node in subgraph.nodes:
+            stmt = node.stmt
+            if not stmt:
+                continue
+
+            print(f"[DEBUG]   Node stmt type: {type(stmt).__name__}")
+
+    def _process_case_statement(self, fsm: FSM, case_stmt: CaseStatement, state_var: str, next_state_var: str):
+        """处理case语句提取状态转换"""
+        # case语句的选择表达式应该是状态变量
+        if not isinstance(case_stmt.comp, Identifier):
+            return
+
+        if case_stmt.comp.name != state_var:
+            return
+
+        print(f"[DEBUG] Processing case statement for {state_var}")
+
+        # 处理每个case
+        for case in case_stmt.caselist:
+            # 获取源状态
+            from_state_name = None
+            case_cond = case.cond
+
+            # 处理case.cond可能是tuple的情况 (e.g., (zero,))
+            if isinstance(case_cond, tuple):
+                if len(case_cond) > 0:
+                    case_cond = case_cond[0]
+                else:
+                    case_cond = None
+
+            if case_cond:
+                if isinstance(case_cond, Identifier):
+                    from_state_name = case_cond.name
+                elif isinstance(case_cond, IntConst):
+                    # 尝试匹配数值到状态名
+                    value = self._parse_int_const(case_cond)
+                    from_state_name = self._find_state_by_value(fsm, value)
+
+            if not from_state_name:
+                print(f"[DEBUG]   Skipping case: no from_state_name (cond={case_cond})")
+                continue
+
+            print(f"[DEBUG]   Case: {from_state_name}")
+
+            # 确保源状态存在
+            if from_state_name not in fsm.states:
+                fsm.add_state(State(name=from_state_name, value=case.cond))
+
+            # 处理case中的语句，寻找下一个状态赋值
+            self._find_next_state_in_statement(fsm, case.statement, from_state_name, next_state_var)
+
+    def _process_if_statement(self, fsm: FSM, if_stmt: IfStatement, state_var: str, next_state_var: str):
+        """处理if语句提取状态转换"""
+        # 检查条件中是否涉及状态变量
+        cond_str = self._expr_to_str(if_stmt.cond)
+
+        # 处理then分支
+        if if_stmt.true_statement:
+            self._find_transitions_in_if_branch(fsm, if_stmt.true_statement, cond_str, next_state_var)
+
+        # 处理else分支
+        if if_stmt.false_statement:
+            else_cond = f"!({cond_str})"
+            self._find_transitions_in_if_branch(fsm, if_stmt.false_statement, else_cond, next_state_var)
+
+    def _find_transitions_in_if_branch(self, fsm: FSM, stmt, condition: str, next_state_var: str):
+        """在if分支中查找状态转换"""
+        # 查找对下一状态变量的赋值
+        if isinstance(stmt, NonblockingSubstitution):
+            self._process_state_assignment(fsm, stmt, condition, next_state_var)
+        elif isinstance(stmt, Block):
+            for s in stmt.statements:
+                self._find_transitions_in_if_branch(fsm, s, condition, next_state_var)
+        elif isinstance(stmt, IfStatement):
+            # 嵌套if
+            cond_str = self._expr_to_str(stmt.cond)
+            combined_cond = f"{condition} && {cond_str}"
+            if stmt.true_statement:
+                self._find_transitions_in_if_branch(fsm, stmt.true_statement, combined_cond, next_state_var)
+
+    def _find_next_state_in_statement(self, fsm: FSM, stmt, from_state_name: str, next_state_var: str, condition: str = ""):
+        """在语句中查找下一个状态"""
+        if not stmt:
+            return
+
+        # 处理阻塞和非阻塞赋值
+        if isinstance(stmt, (NonblockingSubstitution, BlockingSubstitution)):
+            # 检查是否是对下一状态变量的赋值
+            lval = stmt.left
+            if isinstance(lval, Lvalue):
+                lval = lval.var
+
+            if isinstance(lval, Identifier) and lval.name == next_state_var:
+                # 获取目标状态
+                rval = stmt.right
+                if isinstance(rval, Rvalue):
+                    rval = rval.var
+
+                to_state_name = None
+                if isinstance(rval, Identifier):
+                    to_state_name = rval.name
+                elif isinstance(rval, IntConst):
+                    value = self._parse_int_const(rval)
+                    to_state_name = self._find_state_by_value(fsm, value)
+
+                if to_state_name:
+                    if to_state_name not in fsm.states:
+                        fsm.add_state(State(name=to_state_name, value=rval))
+
+                    transition = StateTransition(
+                        from_state=fsm.states[from_state_name],
+                        to_state=fsm.states[to_state_name],
+                        condition=condition,
+                        lineno=stmt.lineno
+                    )
+                    fsm.add_transition(transition)
+                    print(f"[DEBUG]     Added transition: {from_state_name} -> {to_state_name}")
+
+        elif isinstance(stmt, Block):
+            for s in stmt.statements:
+                self._find_next_state_in_statement(fsm, s, from_state_name, next_state_var, condition)
+
+        elif isinstance(stmt, IfStatement):
+            # 在if语句中可能有条件转换
+            cond_str = self._expr_to_str(stmt.cond)
+            true_cond = f"{condition} && ({cond_str})" if condition else cond_str
+            false_cond = f"{condition} && !({cond_str})" if condition else f"!({cond_str})"
+
+            if stmt.true_statement:
+                self._find_next_state_in_statement(fsm, stmt.true_statement, from_state_name, next_state_var, true_cond)
+            if stmt.false_statement:
+                self._find_next_state_in_statement(fsm, stmt.false_statement, from_state_name, next_state_var, false_cond)
+
+    def _find_next_state_in_if(self, fsm: FSM, stmt, from_state_name: str, condition: str, next_state_var: str):
+        """在if语句中查找下一个状态"""
+        if isinstance(stmt, NonblockingSubstitution):
+            lval = stmt.left
+            if isinstance(lval, Lvalue):
+                lval = lval.var
+
+            if isinstance(lval, Identifier) and lval.name == next_state_var:
+                rval = stmt.right
+                if isinstance(rval, Rvalue):
+                    rval = rval.var
+
+                to_state_name = None
+                if isinstance(rval, Identifier):
+                    to_state_name = rval.name
+                elif isinstance(rval, IntConst):
+                    value = self._parse_int_const(rval)
+                    to_state_name = self._find_state_by_value(fsm, value)
+
+                if to_state_name:
+                    if to_state_name not in fsm.states:
+                        fsm.add_state(State(name=to_state_name, value=rval))
+
+                    transition = StateTransition(
+                        from_state=fsm.states[from_state_name],
+                        to_state=fsm.states[to_state_name],
+                        condition=condition,
+                        condition_expr=stmt,
+                        lineno=stmt.lineno
+                    )
+                    fsm.add_transition(transition)
+
+        elif isinstance(stmt, Block):
+            for s in stmt.statements:
+                self._find_next_state_in_if(fsm, s, from_state_name, condition, next_state_var)
+
+    def _process_state_assignment(self, fsm: FSM, subst: NonblockingSubstitution, condition: str, next_state_var: str):
+        """处理状态赋值"""
+        lval = subst.left
+        if isinstance(lval, Lvalue):
+            lval = lval.var
+
+        if isinstance(lval, Identifier) and lval.name == next_state_var:
+            rval = subst.right
+            if isinstance(rval, Rvalue):
+                rval = rval.var
+
+            # 这里需要知道当前状态，可能需要更复杂的分析
+            pass
+
+    def _identify_initial_state(self, fsm: FSM, subgraph: DataflowGraph):
+        """识别初始状态（复位状态）"""
+        # 通常初始状态是在复位条件下赋值的状态
+        # 查找涉及复位信号的转换
+
+        reset_signals = ['rst', 'rst_n', 'reset', 'reset_n']
+
+        for transition in fsm.transitions:
+            # 检查条件中是否有复位信号
+            cond_lower = transition.condition.lower()
+            for rst in reset_signals:
+                if rst in cond_lower:
+                    # 可能是复位状态
+                    transition.to_state.is_initial = True
+                    return
+
+        # 如果没有找到，将第一个状态设为初始状态
+        if fsm.states:
+            first_state = list(fsm.states.values())[0]
+            first_state.is_initial = True
+
+    def _parse_int_const(self, int_const: IntConst) -> Optional[int]:
+        """解析整数常量"""
+        try:
+            value = int_const.value
+            if isinstance(value, str):
+                if value.startswith("'b") or value.startswith("'B"):
+                    return int(value[2:], 2)
+                elif value.startswith("'h") or value.startswith("'H"):
+                    return int(value[2:], 16)
+                elif value.startswith("'d") or value.startswith("'D"):
+                    return int(value[2:], 10)
+                else:
+                    return int(value, 0)
+            return int(value)
+        except (ValueError, TypeError):
+            return None
+
+    def _find_state_by_value(self, fsm: FSM, value: int) -> Optional[str]:
+        """根据数值查找状态名"""
+        for name, state in fsm.states.items():
+            if state.value == value:
+                return name
+        return None
+
+    def _expr_to_str(self, expr) -> str:
+        """将表达式转换为字符串"""
+        if expr is None:
+            return ""
+        if isinstance(expr, Identifier):
+            return expr.name
+        if isinstance(expr, IntConst):
+            return str(expr.value)
+        if isinstance(expr, UnaryOperator):
+            if isinstance(expr, Ulnot):
+                return f"!{self._expr_to_str(expr.right)}"
+            return str(expr)
+        if isinstance(expr, Operator):
+            left = self._expr_to_str(expr.left) if hasattr(expr, 'left') else ""
+            right = self._expr_to_str(expr.right) if hasattr(expr, 'right') else ""
+            return f"({left} ... {right})"
+        return str(expr)
+
+    def get_fsms(self) -> List[FSM]:
+        """获取所有提取的FSM"""
+        return self.fsms
+
+    def get_fsm_by_name(self, name: str) -> Optional[FSM]:
+        """根据名称获取FSM"""
+        for fsm in self.fsms:
+            if fsm.name == name:
+                return fsm
+        return None
+
+    def print_all_fsms(self):
+        """打印所有FSM"""
+        print(f"\n{'='*60}")
+        print(f"Total FSMs found: {len(self.fsms)}")
+        print(f"{'='*60}")
+
+        for fsm in self.fsms:
+            fsm.print_fsm()

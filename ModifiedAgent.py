@@ -63,7 +63,8 @@ prompt = ChatPromptTemplate.from_messages([
                 buggy code based on the error messages and correct code provided.
                 Your instructions should help improve the buggy code without
                 directly including any information from the correct code. The helpful
-                instruction is: Based on the error message""")  # {question} 是动态参数，接收用户输入
+                instruction is: Based on the error message.
+                我需要你给出的是中文""")  # {question} 是动态参数，接收用户输入
 ])
 
 # 3. 定义输出解析器（将模型返回的复杂格式转为纯文本）
@@ -109,9 +110,9 @@ def log_print(msg):
     with open('agent_log.txt', 'w', encoding='utf-8') as f:
         f.write(log_msg + '\n')
 if __name__ == "__main__":
-    code = read_code_file("./example/loop.v")
-    # error = read_code_file("./dma_log.txt")
-    question=code
+    code = read_code_file("finish/fsm_with_unreachable_state.v")
+    error = read_code_file("./dma_log.txt")
+    question=code+error
     answer = ask_question(question)
     log_print(f"模型回答：{answer}")
 

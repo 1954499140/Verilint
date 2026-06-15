@@ -1,0 +1,256 @@
+{
+  "name": "verilint",
+  "displayName": "Verilint - Verilog Linter",
+  "description": "Static analysis and linting for Verilog HDL",
+  "version": "1.0.0",
+  "publisher": "verilint",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Debuggers"
+  ],
+  "keywords": [
+    "verilog",
+    "hdl",
+    "lint",
+    "fpga",
+    "rtl"
+  ],
+  "activationEvents": [
+    "onLanguage:verilog"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "verilog",
+        "aliases": [
+          "Verilog",
+          "verilog"
+        ],
+        "extensions": [
+          ".v",
+          ".vh",
+          ".sv"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "verilint.runLint",
+        "title": "Run Verilint",
+        "icon": "$(play)"
+      },
+      {
+        "command": "verilint.runLintOnFile",
+        "title": "Verilint: Check Current File"
+      },
+      {
+        "command": "verilint.clearDiagnostics",
+        "title": "Verilint: Clear All Diagnostics"
+      },
+      {
+        "command": "verilint.showOutput",
+        "title": "Verilint: Show Output"
+      },
+      {
+        "command": "verilint.aiFix",
+        "title": "Verilint: Get AI Fix for Issue",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "verilint.showIssuesAndFix",
+        "title": "Verilint: Select Issue for AI Fix",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "verilint.runProjectLint",
+        "title": "Verilint: Check Entire Project",
+        "icon": "$(folder-opened)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "verilint.runLint",
+          "group": "navigation",
+          "when": "editorLangId == verilog"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "verilint.runLint"
+        },
+        {
+          "command": "verilint.runLintOnFile"
+        },
+        {
+          "command": "verilint.clearDiagnostics"
+        },
+        {
+          "command": "verilint.showOutput"
+        },
+        {
+          "command": "verilint.aiFix"
+        },
+        {
+          "command": "verilint.showIssuesAndFix"
+        },
+        {
+          "command": "verilint.runProjectLint"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "verilint.runProjectLint",
+          "group": "verilint@1",
+          "when": "explorerResourceIsFolder"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "verilint.aiFix",
+          "group": "verilint@1",
+          "when": "editorLangId == verilog"
+        },
+        {
+          "command": "verilint.showIssuesAndFix",
+          "group": "verilint@2",
+          "when": "editorLangId == verilog"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "Verilint",
+      "properties": {
+        "verilint.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to verilint_checker.py (leave empty to use built-in)"
+        },
+        "verilint.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python executable"
+        },
+        "verilint.runOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run linting on file save"
+        },
+        "verilint.runOnType": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run linting while typing (may be slow)"
+        },
+        "verilint.showInfo": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show INFO level diagnostics"
+        },
+        "verilint.aiAgentPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to AI fix agent script (ModifiedAgent.py or ai_fix_bridge.py)"
+        },
+        "verilint.enableAIFix": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered fix suggestions"
+        },
+        "verilint.includePaths": {
+          "type": "array",
+          "default": [],
+          "description": "Include file search paths for Verilog preprocessing",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verilint.projectRecursive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Recursively scan directories when running project check"
+        },
+        "verilint.projectRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Project root directory for Verilog files (default: workspace root)"
+        },
+        "verilint.aiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "AI API Key for sidebar chat (e.g., OpenAI, DashScope)"
+        },
+        "verilint.aiBaseUrl": {
+          "type": "string",
+          "default": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "description": "AI API Base URL"
+        },
+        "verilint.aiModel": {
+          "type": "string",
+          "default": "qwen3.5-plus-2026-02-15",
+          "description": "AI Model name"
+        },
+        "verilint.ignoredCodes": {
+          "type": "array",
+          "default": [],
+          "description": "List of error codes to ignore (e.g., WID008, REG002)",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "problemPatterns": [
+      {
+        "name": "verilint",
+        "regexp": "^\\s*Line\\s+(\\d+):\\s+(\\d+)\\s+\\[(\\w+)\\]\\s+(.+)$",
+        "file": 1,
+        "line": 2,
+        "column": 3,
+        "code": 4,
+        "message": 5
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "verilint-sidebar",
+          "title": "Verilint AI",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "verilint-sidebar": [
+        {
+          "type": "webview",
+          "id": "verilint.sidebarChat",
+          "name": "AI 助手",
+          "icon": "$(comment-discussion)",
+          "contextualTitle": "Verilint AI 助手"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "18.x",
+    "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^5.45.0",
+    "@typescript-eslint/parser": "^5.45.0",
+    "eslint": "^8.28.0",
+    "typescript": "^4.9.4"
+  }
+}

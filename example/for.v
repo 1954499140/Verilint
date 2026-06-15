@@ -5,7 +5,7 @@ module for_error(
 );
 
 always @(*) begin
-    out = 1'b0;
+    integer out = 1'b0;
     for(integer i=0;i<4;i=i+1) begin
         out = out | data[i];
     end

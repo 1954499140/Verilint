@@ -1,0 +1,66 @@
+## Bus property sets, not included in repo
+##
+faxi_addr.v
+faxi_slave.v
+faxi_master.v
+faxi_valaddr.v
+faxi_wstrb.v
+#
+faxil_slave.v
+faxil_master.v
+
+## Wrappers
+zipaxi*/
+zipbones*/
+zipaxil*/
+
+## Core
+zipcore*/
+zipcpu*/
+
+## Fetch
+axilfetch*/
+axiicache*/
+dblfetch*/
+pfcache*/
+pffifo*/
+prefetch*/
+
+## Memory
+dcache*/
+axiops*/
+axilops*/
+axilpipe*/
+axidcache*/
+axipipe*/
+memops*/
+pipemem*/
+memdev*/
+
+## Peripherals
+axilperiphs*/
+zipcounter*/
+ziptimer*/
+zipjiffies*/
+icontrol*/
+wbwatchdog*/
+
+## ZipDMA
+zipdma_mm2s*/
+zipdma_rxgears*/
+zipdma_txgears*/
+zipdma_s2mm*/
+wbdmac*/
+
+## Other
+div*/
+idecode*/
+busdelay*/
+cpuops*/
+wbdblpriarb*/
+wbpriarbiter*/
+zipmmu*/
+##
+##
+axiops_tb.v
+zipaxi.gtkw

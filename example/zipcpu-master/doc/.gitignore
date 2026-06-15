@@ -1,0 +1,8 @@
+src/zipos.tex
+zipos.pdf
+*.aux
+*.dvi
+*.log
+*.out
+usage.ps
+axifetch.txt

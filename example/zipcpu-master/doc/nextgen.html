@@ -1,0 +1,87 @@
+<HTML><HEAD><TITLE>ZipCPU ISA - CheatSheet</TITLE></HEAD><BODY>
+<H1 align=center>Zip CPU ISA -CheatSheet</H1>
+
+<P align=center><TABLE border>
+<TR>
+	<TH>31</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH>
+	<TH>27</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH>
+	<TH>23</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH>
+	<TH>19</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH>
+	<TH>15</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH>
+	<TH>11</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH>
+	<TH>7</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH>
+	<TH>3</TH> <TH>&nbsp;</TH> <TH>&nbsp;</TH> <TH>0</TH></TR>
+<TR><TD rowspan=4>0</TD><TD colspan=4 rowspan=2>4'DR</TD><TD colspan=5 rowspan=2>5'OpCode</TD><TD colspan=3 rowspan=2>3'Cond</TD><TD>0</TD><TD colspan=18>18'Immediate</TD></TR>
+	<TR><TD>1</TD><TD colspan=4>B-Reg</TD><TD colspan=14>14'Immediate</TD></TR>
+<TR><TD colspan=4>4'DR</TD><TD colspan=5>MOV</TD>
+<TD colspan=3>3'Cond</TD><TD>A</TD><TD colspan=4>B-Reg</TD><TD>B</TD><TD colspan=13>13'Immediate</TD></TR>
+<TR><TD colspan=4>4'DR</TD><TD colspan=4>LDI</TD><TD colspan=23>23'Immediate</TD></TR>
+<!-- -->
+<TR><TD rowspan=2>1</TD><TD colspan=4 rowspan=2>4'DR</TD>
+	<TD colspan=3 rowspan=2>3'OpCode</TD><TD rowspan=2>A</TD>
+	<TD colspan=7 rowspan=2>7'Op-B</TD></TD>
+	<TD rowspan=2>&nbsp;</TD><TD colspan=4>4'DR</TD><TD colspan=3>3'OpCode</TD><TD>0</TD><TD colspan=7>7'Imm</TD></TR>
+<TR><TD colspan=4>4'DR</TD><TD colspan=3>3'OpCode</TD><TD>1</TD><TD colspan=4>B-Reg</TD><TD colspan=3>3'Imm</TD></TR>
+<!-- -->
+</TABLE>
+<P align=center><TABLE BORDER>
+<TR><TD colspan=4>Normal instructions</TD><TD colspan=2>Compressed</TD></TR>
+<TR><TD><TT>00000</TT></TD><TD bgcolor=fffbbb>SUB</TD> <TD><TT>10000</TT></TD><TD bgcolor=bbffff>CMP</TD><TD><TT>000</TT></TD><TD bgcolor=fffbbb>SUB</TD></TR>
+<TR><TD><TT>00001</TT></TD><TD bgcolor=fffbbb>AND</TD> <TD><TT>10001</TT></TD><TD bgcolor=bbffff>TEST</TD><TD><TT>001</TT></TD><TD bgcolor=fffbbb>AND</TD></TR>
+<TR><TD><TT>00010</TT></TD><TD bgcolor=fffbbb>ADD</TD> <TD><TT>10010</TT></TD><TD bgcolor=d9ffbb>LW</TD><TD><TT>010</TT></TD><TD bgcolor=fffbbb>ADD</TD></TR>
+<TR><TD><TT>00011</TT></TD><TD bgcolor=fffbbb>OR</TD> <TD><TT>10011</TT></TD><TD bgcolor=d9ffbb>SW</TD><TD><TT>011</TT></TD><TD bgcolor=bbffff>CMP</TD></TR>
+<TR><TD><TT>00100</TT></TD><TD bgcolor=fffbbb>XOR</TD><TD><TT>10100</TT></TD><TD bgcolor=d9ffbb>LH</TD><TD><TT>100</TT></TD><TD bgcolor=d9ffbb>LW</TD></TR>
+<TR><TD><TT>00101</TT></TD><TD bgcolor=fffbbb>LSR</TD><TD><TT>10101</TT></TD><TD bgcolor=d9ffbb>SH</TD><TD><TT>101</TT></TD><TD bgcolor=d9ffbb>SW</TD></TR>
+<TR><TD><TT>00110</TT></TD><TD bgcolor=fffbbb>LSL</TD><TD><TT>10110</TT></TD><TD bgcolor=d9ffbb>LB</TD><TD><TT>110</TT></TD><TD bgcolor=dfdfbf>LDI</TD></TR>
+<TR><TD><TT>00111</TT></TD><TD bgcolor=fffbbb>ASR</TD><TD><TT>10111</TT></TD><TD bgcolor=d9ffbb>SB</TD><TD><TT>111</TT></TD><TD bgcolor=fff777>MOV</TD></TR>
+<TR><TD><TT>01000</TT></TD><TD bgcolor=dfdfbf>BREV</TD><TD><TT>11000</TT></TD><TD bgcolor=dfdfbf rowspan=2>LDI</TD><TD rowspan=2 colspan=2 valign=bottom>Reserved for FPU</TD></TR>
+<TR><TD><TT>01001</TT></TD><TD bgcolor=dfdfbf>LDILO</TD><TD><TT>11001</TT></TD></TR>
+<TR><TD><TT>01010</TT></TD><TD bgcolor=bbcfef>MPYUHI</TD><TD rowspan=2 valign=bottom colspan=2>Special Insn</TD><TD><TT>11010</TT></TD><TD bgcolor=ffc8bb>FPADD</TD></TR>
+<TR><TD><TT>01011</TT></TD><TD bgcolor=bbcfef>MPYSHI</TD><TD><TT>11011</TT></TD><TD bgcolor=ffc8bb>FPSUB</TD></TR>
+<TR><TD><TT>01100</TT></TD><TD bgcolor=bbcfef>MPY</TD><TD><TT>11100</TT></TD><TD bgcolor=aaaa00ff>BREAK</TD><TD><TT>11100</TT></TD><TD bgcolor=ffc8bb>FPMPY</TD></TD></TR>
+<TR><TD><TT>01101</TT></TD><TD bgcolor=fff777>MOV</TD><TD><TT>11101</TT></TD><TD bgcolor=aaaa00ff>LOCK</TD><TD><TT>11101</TT></TD><TD bgcolor=ffc8bb>FPDIV</TD></TR>
+<TR><TD><TT>01110</TT></TD><TD bgcolor=ffbbff>DIVU</TD><TD><TT>11110</TT></TD><TD bgcolor=aaaa00ff>SIM</TD><TD><TT>11110</TT></TD><TD bgcolor=ffc8bb>FPI2F</TD></TR>
+<TR><TD><TT>01111</TT></TD><TD bgcolor=ffbbff>DIVS</TD><TD><TT>11111</TT></TD><TD bgcolor=aaaa00ff>NOOP</TD><TD><TT>11111</TT></TD><TD bgcolor=ffc8bb>FPF2I</TD></TR>
+</TABLE>
+
+<H3>ASSEMBLER SUPPORTED DERIVED INSTRUCTIONS</H3>
+<TABLE BORDER>
+<TR><TH>Source</TH><TH>Derived Instructions</TH></TR>
+<TR><TD bgcolor=fffbbb>ADD</TD><TD bgcolor=eeeeee>BRA, BLT, BZ, BC, BV, BGE, BNZ, BNC, BUSY</TD></TR>
+<TR><TD bgcolor=fffbbb>OR</TD><TD bgcolor=e6e6e6>RTU, WAIT, HALT, STEP</TD></TR>
+<TR><TD bgcolor=fffbbb>AND</TD><TD bgcolor=eeeeee>TRAP</TD></TR>
+<TR><TD bgcolor=fffbbb>XOR</TD><TD bgcolor=e6e6e6>NOT</TD></TR>
+<TR><TD bgcolor=fff777>MOV</TD><TD bgcolor=eeeeee>(Indirect) JMP, RETN</TD></TR>
+<TR><TD bgcolor=d9ffbb>LW</TD><TD bgcolor=e6e6e6>LJMP</TD></TR>
+<TR><TD bgcolor=dfdfdf>BREV</TD><TD bgcolor=eeeeee>CLR</TD></TR>
+<TR><TD>Multiple</TD><TD bgcolor=eefefe>JSR, LJSR, NEG, SEXTH, SEXTB</TD></TR>
+</TABLE>
+
+<H3>COMPRESSED INSTRUCTION SET (CIS) EXCEPTIONS</H3>
+<P>The CIS LDI instruction uses an 8'bit signed immediate, not 7-bit (-128 to 127).
+<P>MOV will use all opcode bits, and the extra bit selecting reg/imm will
+	be extended to be an immediate bit, so that we can have any 4'bit
+	register offset (-8 to 7)
+<P>To make this more usable, the compressed LW/SW instructions will assume the
+	register is SP if no register is given.  This will allow compressed
+	accesses to stack offsets by between -64 to 63.
+<H3>SIM Codes</H3>
+<P>SIM and NOOP instructions are both 32-bit instructions, and both take an
+	18-bit immediate.
+	This immediate, together with the destination register, is ignored by
+		the CPU--only the simulation pays attention to either.
+	SIM and NOOP instructions are to be treated identically by the
+		simulation (if the CPU is run within a simulation).
+	The CPU will create an illegal instruction on any SIM opcode outside
+	of the simulator, and ignore any NOOP instruction--no matter what
+		the immediate value.
+	Particular immediate values include:
+<OL>
+<LI>OUT/SOUT:
+<LI>NEXIT/SEXIT: with an 8-bit (signed) exit code
+<LI>SIMNOOP: useful for testing if the simulator is present.  Will cause an
+	ILLegal instruction if the simulator is not present, but ignored
+	otherwise.  This will be the immediate value of zero.
+<LI>NDUMP/SDUMP: dump the CPU state (all the registers) to the output
+</OL>
+</BODY></HTML>

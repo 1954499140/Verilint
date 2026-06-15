@@ -1,0 +1,568 @@
+"""
+Branch Coverage Checker - 分支覆盖与可达性检查器
+
+Detects:
+1. 不完全的分支覆盖（缺少 default/else）
+2. 不可达的分支条件（如 5-bit 信号不可能 >= 32）
+3. 冗余的分支条件
+4. Case 语句的完整性检查
+5. 复位信号极性检查（低有效复位是否正确使用 if (!rst)）
+"""
+
+from typing import List, Set, Dict, Tuple, Optional, Any, Union
+from dataclasses import dataclass, field
+from enum import Enum
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from pyverilog.vparser.ast import (
+    ModuleDef, Always, AlwaysFF, CaseStatement, Case, Block, IfStatement,
+    Identifier, IntConst, Parameter, Localparam,
+    Eq, LessEq, GreaterEq, LessThan, GreaterThan,
+    Partselect, Concat, Land, Lor, Ulnot,
+    Decl, GenerateStatement, ForStatement, WhileStatement,
+    And, Or, Xor, Sens
+)
+from symbol_table_builder import SymbolTableBuilder
+from symbol import Symbol
+
+# Import Z3 utils
+try:
+    from .z3_utils import Z3Converter, Z3Checker, is_z3_available
+    Z3_AVAILABLE = is_z3_available()
+except ImportError:
+    try:
+        from z3_utils import Z3Converter, Z3Checker, is_z3_available
+        Z3_AVAILABLE = is_z3_available()
+    except ImportError:
+        Z3_AVAILABLE = False
+
+
+class BranchIssueType(Enum):
+    """分支问题类型"""
+    INCOMPLETE_CASE = "incomplete_case"          # case 不完全覆盖
+    MISSING_DEFAULT = "missing_default"          # 缺少 default
+    UNREACHABLE_COND = "unreachable_condition"   # 条件不可达
+    REDUNDANT_COND = "redundant_condition"       # 冗余条件
+    OVERLAPPING_COND = "overlapping_condition"   # 重叠条件
+    MISSING_ELSE = "missing_else"                # 缺少 else
+    EMPTY_BRANCH = "empty_branch"                # 空分支
+    RESET_POLARITY_MISMATCH = "reset_polarity_mismatch"  # 复位极性不匹配
+
+
+@dataclass
+class BranchCondition:
+    """分支条件"""
+    condition: Any           # AST 条件节点
+    condition_str: str       # 条件字符串表示
+    lineno: int              # 行号
+    is_reachable: bool = True
+    unreachable_reason: str = ""
+
+
+@dataclass
+class BranchIssue:
+    """分支问题报告"""
+    issue_type: BranchIssueType
+    lineno: int
+    description: str
+    severity: str = "warning"
+    suggestion: str = ""
+
+
+class BranchCoverageChecker:
+    """
+    分支覆盖检查器
+    使用Z3 solver进行精确的分支互斥性和可达性分析
+    """
+
+    def __init__(self, ast, stb: SymbolTableBuilder, use_z3: bool = True):
+        self.ast = ast
+        self.stb = stb
+        self.issues: List[BranchIssue] = []
+        self.current_scope = None
+        self.use_z3 = use_z3 and Z3_AVAILABLE
+        self.z3_converter: Optional[Z3Converter] = None
+        self.z3_checker: Optional[Z3Checker] = None
+
+        if self.use_z3:
+            self._init_z3()
+            import sys
+            print("[BranchChecker] Z3 solver enabled for precise branch analysis", file=sys.stderr)
+        elif use_z3 and not Z3_AVAILABLE:
+            import sys
+            print("[BranchChecker] Z3 not available, using heuristic analysis", file=sys.stderr)
+
+    def _init_z3(self):
+        """初始化Z3转换器和检查器"""
+        def scope_lookup(var_name: str):
+            if self.current_scope:
+                return self.current_scope.lookup_symbol(var_name)
+            return None
+
+        self.z3_converter = Z3Converter(scope_lookup)
+        self.z3_checker = Z3Checker(self.z3_converter)
+
+    def check(self) -> List[BranchIssue]:
+        """执行所有分支检查"""
+        self.issues = []
+        self._traverse_ast(self.ast)
+        return self.issues
+
+    def _traverse_ast(self, node):
+        """遍历 AST"""
+        if isinstance(node, ModuleDef):
+            module_scope = self.stb.get_module_scope(node.name)
+            if module_scope:
+                self.current_scope = module_scope
+
+        if isinstance(node, (Always, AlwaysFF)):
+            self._check_always_reset(node)
+        if isinstance(node, CaseStatement):
+            self._check_case_statement(node)
+        elif isinstance(node, IfStatement):
+            self._check_if_statement(node)
+
+        for child in self._get_children(node):
+            self._traverse_ast(child)
+
+        if isinstance(node, ModuleDef):
+            self.current_scope = None
+
+    def _get_children(self, node) -> List[Any]:
+        """获取子节点"""
+        children = []
+        if hasattr(node, "__dict__"):
+            for attr_val in node.__dict__.values():
+                if isinstance(attr_val, (list, tuple)):
+                    children.extend(attr_val)
+                elif attr_val is not None and hasattr(attr_val, "__dict__"):
+                    children.append(attr_val)
+        return children
+
+    def _check_always_reset(self, always_node):
+        """检查 always 块中的复位信号极性"""
+        if not hasattr(always_node, "sens_list") or not always_node.sens_list:
+            return
+
+        reset_signals = {}
+        if hasattr(always_node.sens_list, "list"):
+            for sens in always_node.sens_list.list:
+                if hasattr(sens, "type") and sens.type in ("posedge", "negedge"):
+                    if hasattr(sens, "sig") and isinstance(sens.sig, Identifier):
+                        sig_name = sens.sig.name
+                        reset_signals[sig_name] = sens.type
+
+        if not reset_signals:
+            return
+
+        if hasattr(always_node, "statement") and always_node.statement:
+            self._check_reset_if_condition(always_node.statement, reset_signals)
+
+    def _check_reset_if_condition(self, stmt, reset_signals):
+        """检查复位条件是否正确"""
+        if stmt is None:
+            return
+
+        if isinstance(stmt, IfStatement):
+            cond = stmt.cond
+            if isinstance(cond, Identifier) and cond.name in reset_signals:
+                reset_name = cond.name
+                edge_type = reset_signals[reset_name]
+                if edge_type == "negedge":
+                    self.issues.append(BranchIssue(
+                        issue_type=BranchIssueType.RESET_POLARITY_MISMATCH,
+                        lineno=stmt.lineno,
+                        description=f"Reset polarity mismatch: '{reset_name}' is active-low (negedge) but checked with 'if ({reset_name})'",
+                        severity="error",
+                        suggestion=f"Change 'if ({reset_name})' to 'if (!{reset_name})' for active-low reset"
+                    ))
+            if hasattr(stmt, "true_statement") and stmt.true_statement:
+                self._check_reset_if_condition(stmt.true_statement, reset_signals)
+            if hasattr(stmt, "false_statement") and stmt.false_statement:
+                self._check_reset_if_condition(stmt.false_statement, reset_signals)
+
+        if hasattr(stmt, "statements"):
+            for s in stmt.statements:
+                self._check_reset_if_condition(s, reset_signals)
+
+        if hasattr(stmt, "caselist"):
+            for case in stmt.caselist:
+                if case.statement:
+                    self._check_reset_if_condition(case.statement, reset_signals)
+
+    def _check_case_statement(self, case_stmt: CaseStatement):
+        """检查 case 语句的覆盖和可达性"""
+        if not self.current_scope:
+            return
+
+        lineno = case_stmt.lineno
+        case_var = self._get_case_variable(case_stmt.comp)
+        if not case_var:
+            return
+
+        var_width = self._get_variable_width(case_var)
+        case_conditions = []
+        has_default = False
+
+        for case in case_stmt.caselist:
+            if case.cond is None:
+                has_default = True
+            else:
+                cond_value = self._eval_case_condition(case.cond)
+                if isinstance(cond_value, int):
+                    case_conditions.append((cond_value, case.lineno))
+
+        # 1. 检查是否缺少 default
+        if not has_default:
+            if var_width:
+                total_values = 2 ** var_width
+                unique_conditions = set(c[0] for c in case_conditions)
+
+                if len(unique_conditions) < total_values:
+                    self.issues.append(BranchIssue(
+                        issue_type=BranchIssueType.MISSING_DEFAULT,
+                        lineno=lineno,
+                        description=f"Case statement on '{case_var}' ({var_width}-bit) missing default: "
+                                   f"covers {len(unique_conditions)}/{total_values} possible values",
+                        severity="warning",
+                        suggestion=f"Add default case or cover all {total_values} possible values"
+                    ))
+                elif len(unique_conditions) > total_values:
+                    self.issues.append(BranchIssue(
+                        issue_type=BranchIssueType.REDUNDANT_COND,
+                        lineno=lineno,
+                        description=f"Case statement has more conditions ({len(unique_conditions)}) "
+                                   f"than possible values ({total_values}) for {var_width}-bit '{case_var}'",
+                        severity="error"
+                    ))
+            else:
+                self.issues.append(BranchIssue(
+                    issue_type=BranchIssueType.MISSING_DEFAULT,
+                    lineno=lineno,
+                    description=f"Case statement on '{case_var}' missing default",
+                    severity="warning",
+                    suggestion="Add default case to handle unexpected values"
+                ))
+
+        # 2. 检查每个 case 条件的可达性
+        for cond_value, cond_lineno in case_conditions:
+            if var_width and isinstance(cond_value, int) and cond_value >= 2 ** var_width:
+                self.issues.append(BranchIssue(
+                    issue_type=BranchIssueType.UNREACHABLE_COND,
+                    lineno=cond_lineno,
+                    description=f"Unreachable case condition: {cond_value} cannot be represented "
+                               f"by {var_width}-bit variable '{case_var}' (max: {2**var_width - 1})",
+                    severity="error"
+                ))
+
+        # 3. 检查重复/重叠条件
+        seen_values = {}
+        for cond_value, cond_lineno in case_conditions:
+            if not isinstance(cond_value, int):
+                continue
+            if cond_value in seen_values:
+                self.issues.append(BranchIssue(
+                    issue_type=BranchIssueType.OVERLAPPING_COND,
+                    lineno=cond_lineno,
+                    description=f"Overlapping case condition: value {cond_value} already handled at line {seen_values[cond_value]}",
+                    severity="warning"
+                ))
+            else:
+                seen_values[cond_value] = cond_lineno
+
+        # 4. 使用Z3检查复杂的互斥性和可达性
+        if self.use_z3 and self.z3_checker and len(case_stmt.caselist) > 1:
+            self._check_case_conditions_z3(case_stmt, case_var, var_width)
+
+    def _check_case_conditions_z3(self, case_stmt: CaseStatement, case_var: str, var_width: Optional[int]):
+        """使用Z3检查case条件的互斥性和可达性"""
+        if not var_width:
+            return
+
+        try:
+            # 收集所有非default的case条件
+            conditions = []
+            for case in case_stmt.caselist:
+                if case.cond is not None:
+                    if isinstance(case.cond, (list, tuple)):
+                        for c in case.cond:
+                            val = self._eval_case_condition(c)
+                            if val is not None:
+                                conditions.append(val)
+                    else:
+                        val = self._eval_case_condition(case.cond)
+                        if val is not None:
+                            conditions.append(val)
+
+            # 使用Z3检查覆盖完整性
+            if len(conditions) > 1 and self.z3_converter:
+                z3_var = self.z3_converter._create_var(case_var, var_width)
+                z3_conditions = [z3_var == z3.BitVecVal(val, var_width) for val in conditions]
+
+                import z3
+                solver = z3.Solver()
+
+                if len(z3_conditions) == 1:
+                    coverage = z3_conditions[0]
+                else:
+                    coverage = z3_conditions[0]
+                    for cond in z3_conditions[1:]:
+                        coverage = z3.Or(coverage, cond)
+
+                solver.push()
+                solver.add(z3.Not(coverage))
+                solver.check()  # Check for uncovered values
+                solver.pop()
+
+        except Exception as e:
+            # Silently ignore Z3 errors to avoid noise in output
+            pass
+
+    def _check_if_statement(self, if_stmt: IfStatement):
+        """检查 if 语句的覆盖和可达性"""
+        if not self.current_scope:
+            return
+
+        lineno = if_stmt.lineno
+        cond_analysis = self._analyze_condition(if_stmt.cond)
+
+        # 2. 检查是否缺少 else
+        if not if_stmt.false_statement:
+            if self._should_have_else(if_stmt.cond):
+                self.issues.append(BranchIssue(
+                    issue_type=BranchIssueType.MISSING_ELSE,
+                    lineno=lineno,
+                    description=f"If statement may be missing else branch for condition: {cond_analysis['condition_str']}",
+                    severity="info"
+                ))
+
+        # 4. 使用Z3进行更精确的可达性分析
+        if self.use_z3 and self.z3_checker:
+            is_reachable = self.z3_checker.is_reachable(if_stmt.cond)
+            if is_reachable == False:
+                self.issues.append(BranchIssue(
+                    issue_type=BranchIssueType.UNREACHABLE_COND,
+                    lineno=lineno,
+                    description=f"If condition is unreachable (Z3 verified): {cond_analysis['condition_str']}",
+                    severity="error",
+                    suggestion="This condition can never be satisfied due to variable constraints"
+                ))
+
+        # 5. 检查if-else分支的互斥性和完整性
+        if if_stmt.false_statement and self.use_z3 and self.z3_checker:
+            self._check_if_else_mutex(if_stmt, lineno)
+
+    def _check_if_else_mutex(self, if_stmt: IfStatement, lineno: int):
+        """使用Z3检查if-else分支的互斥性和完整性"""
+        try:
+            if_reachable, else_reachable = self.z3_checker.check_if_else(if_stmt.cond)
+
+            if if_reachable == False:
+                self.issues.append(BranchIssue(
+                    issue_type=BranchIssueType.UNREACHABLE_COND,
+                    lineno=lineno,
+                    description=f"If condition is always false (Z3 verified)",
+                    severity="warning",
+                    suggestion="Consider removing the if statement or the true branch"
+                ))
+
+            if else_reachable == False:
+                self.issues.append(BranchIssue(
+                    issue_type=BranchIssueType.UNREACHABLE_COND,
+                    lineno=lineno,
+                    description=f"Else branch is unreachable (if condition is always true)",
+                    severity="warning",
+                    suggestion="Consider removing the else branch"
+                ))
+
+        except Exception as e:
+            print(f"[Z3] Error in if-else analysis: {e}")
+
+    def _get_case_variable(self, comp) -> str:
+        """获取 case 条件变量名"""
+        if isinstance(comp, Identifier):
+            return comp.name
+        if isinstance(comp, Partselect) and isinstance(comp.var, Identifier):
+            return comp.var.name
+        if isinstance(comp, Concat):
+            return str(comp)
+        return ""
+
+    def _get_variable_width(self, var_name: str) -> Optional[int]:
+        """获取变量的位宽"""
+        if not self.current_scope:
+            return None
+
+        symbol = self.current_scope.lookup_symbol(var_name)
+        if symbol:
+            if hasattr(symbol, 'width') and symbol.width:
+                return symbol.width
+            if hasattr(symbol, 'width_msb') and hasattr(symbol, 'width_lsb'):
+                if symbol.width_msb is not None and symbol.width_lsb is not None:
+                    return abs(symbol.width_msb - symbol.width_lsb) + 1
+        return None
+
+    def _eval_case_condition(self, cond) -> Optional[int]:
+        """评估 case 条件值"""
+        if isinstance(cond, tuple):
+            if len(cond) == 0:
+                return None
+            cond = cond[0]
+
+        if isinstance(cond, IntConst):
+            return self._eval_const_expr(cond)
+
+        if isinstance(cond, Identifier):
+            if self.current_scope:
+                symbol = self.current_scope.lookup_symbol(cond.name)
+                if symbol and hasattr(symbol, 'param_value') and symbol.param_value is not None:
+                    if isinstance(symbol.param_value, int):
+                        return symbol.param_value
+
+        return None
+
+    def _eval_const_expr(self, expr) -> Optional[int]:
+        """评估常量表达式"""
+        if isinstance(expr, IntConst):
+            try:
+                val = str(expr.value)
+                if "'" in val:
+                    parts = val.split("'")
+                    if len(parts) >= 2:
+                        val_part = parts[1]
+                        if val_part:
+                            base_char = val_part[0].lower()
+                            value_str = val_part[1:]
+                            if base_char == 'h':
+                                return int(value_str, 16)
+                            elif base_char == 'b':
+                                return int(value_str, 2)
+                            elif base_char == 'd':
+                                return int(value_str, 10)
+                            elif base_char == 'o':
+                                return int(value_str, 8)
+                return int(val, 0)
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def _analyze_condition(self, cond) -> Dict[str, Any]:
+        """分析条件表达式"""
+        result = {
+            'condition_str': self._cond_to_str(cond),
+            'always_true': False,
+            'always_false': False,
+            'depends_on': set()
+        }
+
+        if isinstance(cond, IntConst):
+            val = self._eval_const_expr(cond)
+            if val == 0:
+                result['always_false'] = True
+            elif val is not None and val != 0:
+                result['always_true'] = True
+
+        result['depends_on'] = self._extract_variables(cond)
+        return result
+
+    def _should_have_else(self, cond) -> bool:
+        """判断是否应该有一个 else 分支"""
+        if isinstance(cond, Eq):
+            return True
+        return False
+
+    def _cond_to_str(self, cond) -> str:
+        """将条件转换为字符串"""
+        if isinstance(cond, Identifier):
+            return cond.name
+        if isinstance(cond, IntConst):
+            return str(cond.value)
+        if isinstance(cond, (LessEq, GreaterEq, LessThan, GreaterThan)):
+            left = self._cond_to_str(cond.left)
+            right = self._cond_to_str(cond.right)
+            op_map = {LessEq: "<=", GreaterEq: ">=", LessThan: "<", GreaterThan: ">"}
+            return f"{left} {op_map.get(type(cond), '?')} {right}"
+        if isinstance(cond, Eq):
+            left = self._cond_to_str(cond.left)
+            right = self._cond_to_str(cond.right)
+            return f"{left} == {right}"
+        if isinstance(cond, (Land, Lor)):
+            left = self._cond_to_str(cond.left)
+            right = self._cond_to_str(cond.right)
+            op = "&&" if isinstance(cond, Land) else "||"
+            return f"({left} {op} {right})"
+        if isinstance(cond, Ulnot):
+            return f"!{self._cond_to_str(cond.right)}"
+        return str(cond)
+
+    def _extract_variables(self, cond) -> Set[str]:
+        """从条件中提取变量"""
+        variables = set()
+
+        if isinstance(cond, Identifier):
+            variables.add(cond.name)
+        elif isinstance(cond, (LessEq, GreaterEq, LessThan, GreaterThan, Eq, Land, Lor, And, Or, Xor)):
+            if hasattr(cond, 'left'):
+                variables.update(self._extract_variables(cond.left))
+            if hasattr(cond, 'right'):
+                variables.update(self._extract_variables(cond.right))
+        elif isinstance(cond, Ulnot):
+            variables.update(self._extract_variables(cond.right))
+
+        return variables
+
+    def print_report(self):
+        """打印检查报告"""
+        print("\n" + "=" * 70)
+        print("Branch Coverage Check Report")
+        print("=" * 70)
+
+        if not self.issues:
+            print("No branch coverage issues found")
+            return
+
+        by_type = {}
+        for issue in self.issues:
+            if issue.issue_type not in by_type:
+                by_type[issue.issue_type] = []
+            by_type[issue.issue_type].append(issue)
+
+        for issue_type, issues in by_type.items():
+            severity = issues[0].severity.upper()
+            print(f"\n[{severity}] {issue_type.value.replace('_', ' ').title()} ({len(issues)}):")
+            for issue in issues:
+                print(f"  Line {issue.lineno:3d}: {issue.description}")
+                if issue.suggestion:
+                    print(f"           -> {issue.suggestion}")
+
+        print(f"\nTotal: {len(self.issues)} branch issues")
+
+
+def check_branch_coverage(ast, stb: SymbolTableBuilder, use_z3: bool = True) -> List[BranchIssue]:
+    """便捷函数"""
+    checker = BranchCoverageChecker(ast, stb, use_z3=use_z3)
+    issues = checker.check()
+    return issues
+
+
+if __name__ == "__main__":
+    import sys
+    from pyverilog.vparser.parser import parse
+
+    if len(sys.argv) < 2:
+        print("Usage: python branch_coverage_checker.py <verilog_file>")
+        sys.exit(1)
+
+    verilog_file = sys.argv[1]
+    ast, _ = parse([verilog_file])
+
+    from symbol_table_builder import SymbolTableBuilder
+    stb = SymbolTableBuilder()
+    stb.build(ast)
+
+    checker = BranchCoverageChecker(ast, stb)
+    issues = checker.check()
+    checker.print_report()

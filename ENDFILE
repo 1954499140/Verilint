@@ -1,0 +1,143 @@
+[FILE] COMBDLY.v
+  Path: mydata\COMBDLY.v
+  [ERROR]   Line    7:  1 [CMB001] Combinational always block at line 7 has incomplete sensitivity list. Missing signals: b
+  [WARNING] Line   17:  1 [REG002] Register 'out3' is driven but never used
+  [INFO]    Line   11:  1 [CMB003] Combinational always block at line 11 has unused signals in sensitivity list. Extra signals: d
+
+[FILE] CRC_32_serial.v
+  Path: mydata\CRC_32_serial.v
+  [ERROR]   Line   20:  1 [REG003] Register 'state' has multiple drivers: always_seq (line 20), always_seq (line 42)
+  [ERROR]   Line   34:  1 [REG003] Register 'count' has multiple drivers: always_seq (line 34), always_seq (line 41)
+  [WARNING] Line   17:  1 [BRH002] Case statement on 'state' (2-bit) missing default: covers 0/4 possible values
+  [WARNING] Line   31:  1 [BRH003] If condition is unreachable (Z3 verified): count == 32
+  [WARNING] Line   31:  1 [BRH003] If condition is always false (Z3 verified)
+  [WARNING] Line   39:  1 [BRH000] Reset polarity mismatch: 'rst' is active-low (negedge) but checked with 'if (rst)'
+  [WARNING] Line   45:  1 [BRH002] Case statement on 'state' (2-bit) missing default: covers 0/4 possible values
+
+[FILE] fsm_without_default.v
+  Path: mydata\fsm_without_default.v
+  [ERROR]   Line    9:  1 [WID002] Width mismatch: 2-bit LHS assigned 3-bit RHS (truncation)
+  [ERROR]   Line   12:  1 [FSM001] Dead state 'STATE_3': once entered, cannot be left (all 1 transition(s) point to itself)
+  [WARNING] Line   11:  1 [FSM004] FSM using state variable 'state' is missing default case
+  [WARNING] Line   11:  1 [FSM003] Incomplete case coverage: 3/8 state values covered. 5 values missing (no default).
+  [WARNING] Line   11:  1 [BRH002] Case statement on 'user_input' (3-bit) missing default: covers 3/8 possible values
+  [INFO]    Line    1:  1 [FSM005] FSM with 3 states is not using one-hot encoding (values: [3, 4, 5]). Consider using one-hot encoding for better performance
+
+[FILE] fsm_with_dead_state.v
+  Path: mydata\fsm_with_dead_state.v
+  [ERROR]   Line   37:  1 [FSM001] Dead state 'three': once entered, cannot be left (all 1 transition(s) point to itself)
+  [WARNING] Line   47:  1 [BRH002] Case statement on 'current_state' (2-bit) missing default: covers 0/4 possible values
+  [INFO]    Line    1:  1 [FSM005] FSM with 4 states is not using one-hot encoding (values: [0, 1, 2, 3]). Consider using one-hot encoding for better performance
+
+[FILE] fsm_with_unreachable_state.v
+  Path: mydata\fsm_with_unreachable_state.v
+  [WARNING] Line   39:  1 [FSM002] Unreachable state 'three': cannot be reached from initial state 'zero'
+  [INFO]    Line    1:  1 [FSM005] FSM with 4 states is not using one-hot encoding (values: [2, 3, 0, 1]). Consider using one-hot encoding for better performance
+
+[FILE] glitchEx-CWE.v
+  Path: mydata\glitchEx-CWE.v
+  [WARNING] Line   15:  1 [GLT001] Signal 'sel_sync' and its inversion used together in assignment to 'z' - potential glitch hazard
+
+[FILE] incorrectPortInput.v
+  Path: mydata\incorrectPortInput.v
+  [ERROR]   Line   36:  1 [INST002] Port 'rst_n' is used as branch condition in module 'csr_regfile' but connected to constant
+  [WARNING] Line   31:  1 [REG002] Register 'rst_n' is driven but never used
+  [WARNING] Line   34:  1 [REG002] Register 'irq_i' is driven but never used
+  [WARNING] Line   35:  1 [REG002] Register 'time_irq_i' is driven but never used
+  [WARNING] Line   36:  1 [INST001] Port 'clk' of instance 'csr_regfile_i' (csr_regfile) is floating (not connected)
+
+[FILE] loop.v
+  Path: mydata\loop.v
+  [ERROR]   Line   14:  1 [CYC002] Combinational loop: out_indirect_a -> out_indirect_b -> out_indirect_c -> out_indirect_a
+
+[FILE] multipleDriver.v
+  Path: mydata\multipleDriver.v
+  [ERROR]   Line   11:  1 [REG003] Register 'shared_signal' has multiple drivers: always_seq (line 11), always_seq (line 16)
+
+[FILE] pipefetch.v
+  Path: mydata\pipefetch.v
+  [ERROR]   Line  316:  1 [REG001] Register 'r_cv' is used but never driven
+  [INFO]    Line  247:  1 [WID003] Width mismatch: 2-bit LHS assigned 1-bit RHS (zero-extended)
+  [INFO]    Line  250:  1 [WID003] Width mismatch: 2-bit LHS assigned 1-bit RHS (zero-extended)
+
+[FILE] PointerOut.v
+  Path: mydata\PointerOut.v
+  [ERROR]   Line    9:  1 [REG001] Register 'arr' is used but never driven
+  [ERROR]   Line   10:  1 [ARR001] Signal 'arr' out of bounds access: [5] vs declared [7:0][0:4]
+  [ERROR]   Line   10:  1 [WID007] Array index [5] out of bounds for 'arr' (valid range: 0-4)
+  [ERROR]   Line   11:  1 [ARR001] Signal 'arr' out of bounds access: [-1] vs declared [7:0][0:4]
+  [ERROR]   Line   11:  1 [WID007] Array index [-1] out of bounds for 'arr' (valid range: 0-4)
+  [WARNING] Line    9:  1 [REG002] Register 'val' is driven but never used
+  [WARNING] Line   10:  1 [REG002] Register 'val' is driven but never used
+  [WARNING] Line   11:  1 [REG002] Register 'val' is driven but never used
+
+[FILE] turnover_port.v
+  Path: mydata\turnover_port.v
+  [ERROR]   Line    1:  1 [REG001] Register 'b' is used but never driven
+  [ERROR]   Line   17:  1 [INST003] Input port 'data_in' connected to output signal 'b' - possible reversed connection
+
+[FILE] uncoveredbranch.v
+  Path: mydata\uncoveredbranch.v
+  [ERROR]   Line   68:  1 [REG001] Register 'mode' is used but never driven
+  [WARNING] Line   15:  1 [BRH002] Case statement on 'op_code' (3-bit) missing default: covers 3/8 possible values
+  [WARNING] Line   39:  1 [BRH002] Case statement on 'sel' (3-bit) missing default: covers 4/8 possible values
+  [WARNING] Line   57:  1 [FSM002] Unreachable state 'STATE_31': cannot be reached from initial state 'STATE_0'
+  [WARNING] Line   58:  1 [FSM002] Unreachable state 'STATE_32': cannot be reached from initial state 'STATE_0'
+  [WARNING] Line   58:  1 [BRH003] Unreachable case condition: 32 cannot be represented by 5-bit variable 'state' (max: 31)
+  [WARNING] Line   71:  1 [BRH005] Overlapping case condition: value 0 already handled at line 69
+  [WARNING] Line   80:  1 [REG002] Register 'flag' is driven but never used
+  [WARNING] Line   86:  1 [BRH003] If condition is unreachable (Z3 verified): addr >= 5'd32
+  [WARNING] Line   86:  1 [BRH003] If condition is always false (Z3 verified)
+  [WARNING] Line   87:  1 [REG002] Register 'exceed' is driven but never used
+  [WARNING] Line   89:  1 [REG002] Register 'exceed' is driven but never used
+  [WARNING] Line   95:  1 [BRH003] Else branch is unreachable (if condition is always true)
+  [WARNING] Line   96:  1 [REG002] Register 'always_true' is driven but never used
+  [WARNING] Line   98:  1 [REG002] Register 'always_true' is driven but never used
+  [WARNING] Line  104:  1 [BRH003] If condition is unreachable (Z3 verified): addr == 5'd35
+  [WARNING] Line  104:  1 [BRH003] If condition is always false (Z3 verified)
+  [WARNING] Line  105:  1 [REG002] Register 'match' is driven but never used
+  [WARNING] Line  107:  1 [REG002] Register 'match' is driven but never used
+  [INFO]    Line    1:  1 [FSM005] FSM with 4 states is not using one-hot encoding (values: [0, 1, 31, 32]). Consider using one-hot encoding for better performance
+  [INFO]    Line   79:  1 [BRH006] If statement may be missing else branch for condition: addr == 5'd10
+
+[FILE] unreset-test.v
+  Path: mydata\unreset-test.v
+  [ERROR]   Line    6:  1 [RST001] Signal 'y' lacks reset assignment
+
+[FILE] unreset.v
+  Path: mydata\unreset.v
+  [ERROR]   Line   10:  1 [RST001] Signal 'wr_ptr_cur' lacks reset assignment
+  [ERROR]   Line   11:  1 [RST001] Signal 'drop_frame_reg' lacks reset assignment
+  [INFO]    Line   16:  1 [WID003] Width mismatch: 8-bit LHS assigned 1-bit RHS (zero-extended)
+
+[FILE] wire-out.v
+  Path: mydata\wire-out.v
+  [ERROR]   Line   47:  1 [REG001] Register 't' is used but never driven
+  [ERROR]   Line   47:  1 [REG001] Register 'count_out' is used but never driven
+  [ERROR]   Line   72:  1 [REG001] Register 'bounds_temp' is used but never driven
+  [ERROR]   Line   72:  1 [WID006] Part-select [2:5] has msb < lsb
+  [ERROR]   Line   77:  1 [REG001] Register 'overflow_temp' is used but never driven
+  [ERROR]   Line   77:  1 [ARR002] Signal 'overflow_temp' out of bounds access: [10:7] vs declared [7:0]
+  [ERROR]   Line   77:  1 [WID007] Part-select [10:7] exceeds signal 'overflow_temp' valid range [7:0]
+  [ERROR]   Line   81:  1 [WID009] Repeat width (16-bit) exceeds LHS width (8-bit)
+  [ERROR]   Line   81:  1 [WID002] Width mismatch: 8-bit LHS assigned 16-bit RHS (truncation)
+  [ERROR]   Line   85:  1 [ARR001] Signal 't' out of bounds access: [5] vs declared [3:0][0:3]
+  [ERROR]   Line   85:  1 [WID007] Array index [5] out of bounds for 't' (valid range: 0-3)
+  [ERROR]   Line   85:  1 [WID002] Width mismatch: 1-bit LHS assigned 4-bit RHS (truncation)
+  [WARNING] Line   47:  1 [WID005] Instance 'ff' port 'T': expected 1-bit, got 4-bit
+  [WARNING] Line   58:  1 [WID005] Instance 'sm' port 'out_port': expected 2-bit, got 1-bit
+  [WARNING] Line   67:  1 [WID008] Signal 'concat_temp' appears multiple times in concatenation
+  [INFO]    Line   72:  1 [WID003] Width mismatch: 4-bit LHS assigned -2-bit RHS (zero-extended)
+
+======================================================================
+Project Summary:
+======================================================================
+Total files checked: 16
+Total issues found: 83
+  Errors: 33
+  Warnings: 40
+  Infos: 10
+  Lines: 1050
+  Time: 32.81s
+  Speed: 32 lines/s
+======================================================================

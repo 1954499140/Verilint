@@ -1,0 +1,34 @@
+[tasks]
+pipe_div_mpy_cis_opipe		pipelind   div   mpy   cis   pipemem
+pipe_div_mpy_cis_nopipe		pipelind   div   mpy   cis   nopipemem
+pipe_div_mpy_nocis_pipe		pipelind   div   mpy   nocis pipemem
+pipe_div_mpy_nocis_nopipe	pipelind   div   mpy   nocis nopipemem
+pipe_div_nompy_nocis_nopipe	pipelind   div   nompy nocis nopipemem
+pipe_nodiv_nompy_nocis_nopipe	pipelind   nodiv nompy nocis nopipemem
+nopipe_nodiv_nompy_nocis_nopipe	nopipelind nodiv nompy nocis nopipemem
+
+[options]
+mode prove
+depth 10
+
+[engines]
+smtbmc
+
+[script]
+read -formal -D IDECODE idecode.v
+read -formal -D IDECODE f_idecode.v
+--pycode-begin--
+cmd = "hierarchy -top idecode"
+cmd += " -chparam OPT_PIPELINED %d" % (1 if "pipelind" in tags else 0)
+cmd += " -chparam OPT_DIVIDE    %d" % (1 if "div"      in tags else 0)
+cmd += " -chparam OPT_MPY       %d" % (1 if "mpy"      in tags else 0)
+cmd += " -chparam OPT_CIS       %d" % (1 if "cis"      in tags else 0)
+cmd += " -chparam OPT_OPIPE     %d" % (1 if "pipemem"  in tags else 0)
+output(cmd)
+--pycode-end--
+proc -norom
+prep -top idecode
+
+[files]
+../../rtl/core/idecode.v
+f_idecode.v
